@@ -1,121 +1,145 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react";
 
-function App() {
-  const [count, setCount] = useState(0)
+type FieldInfo = {
+  tag: string;
+  type: string | null;
+  name: string;
+  id: string;
+  placeholder: string;
+  label: string;
+  value: string;
+  visible: boolean;
+  disabled: boolean;
+  readOnly: boolean;
+};
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+const CONTENT_SCRIPT_FILE = "chrome-autofill-for-jobs/src/scripts/content.js";
 
-      <div className="ticks"></div>
+function getErrorMessage(err: unknown) {
+  if (!(err instanceof Error)) return "Failed to scan fields.";
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  if (
+    err.message.includes("Missing host permission") ||
+    err.message.includes("Cannot access contents of the page") ||
+    err.message.includes("The extensions gallery cannot be scripted")
+  ) {
+    return "This extension does not currently have access to this site. Grant site access (or reload the extension after permission changes) and try again.";
+  }
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+  if (err.message.includes("Receiving end does not exist")) {
+    return "No listener found on this tab. Reload the tab and extension, then try Refresh again.";
+  }
+
+  return err.message;
 }
 
-export default App
+async function sendMessageWithRetry<T>(tabId: number, message: unknown): Promise<T> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.includes("Receiving end does not exist")) {
+      throw err;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [CONTENT_SCRIPT_FILE],
+    });
+
+    return await chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+export default function App() {
+  const [fields, setFields] = useState<FieldInfo[]>([]);
+  const [pageTitle, setPageTitle] = useState("");
+  const [pageUrl, setPageUrl] = useState("");
+  const [error, setError] = useState("");
+
+  async function scanActiveTab() {
+    try {
+      setError("");
+
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      if (!tab?.id) {
+        throw new Error("No active tab found.");
+      }
+
+      const response = await sendMessageWithRetry<{
+        fields?: FieldInfo[];
+        title?: string;
+        url?: string;
+      }>(tab.id, {
+        type: "SCAN_FIELDS",
+      });
+
+      setFields(response?.fields ?? []);
+      setPageTitle(response?.title ?? "");
+      setPageUrl(response?.url ?? "");
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setFields([]);
+    }
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+
+        if (!tab?.id) return;
+
+        const res = await sendMessageWithRetry<{ fields?: FieldInfo[] }>(tab.id, {
+          type: "READ_FIELDS",
+        });
+
+        setFields(res?.fields || []);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, []);
+
+  return (
+    <div style={{ padding: 12, fontFamily: "sans-serif" }}>
+      <h2>Detected fields</h2>
+      <button onClick={scanActiveTab}>Refresh</button>
+
+      {pageTitle && <p><strong>Page:</strong> {pageTitle}</p>}
+      {pageUrl && <p style={{ wordBreak: "break-all" }}>{pageUrl}</p>}
+      {error && <p>{error}</p>}
+
+      <ul style={{ padding: 0, listStyle: "none" }}>
+        {fields.map((field, i) => (
+          <li
+            key={`${field.id}-${field.name}-${i}`}
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              padding: 10,
+              marginTop: 8,
+            }}
+          >
+            <div><strong>{field.label || field.placeholder || field.name || field.id || "(unlabeled field)"}</strong></div>
+            <div>tag: {field.tag}</div>
+            <div>type: {field.type ?? "-"}</div>
+            <div>name: {field.name || "-"}</div>
+            <div>id: {field.id || "-"}</div>
+            <div>placeholder: {field.placeholder || "-"}</div>
+            <div>value: {field.value || "-"}</div>
+            <div>visible: {String(field.visible)}</div>
+            <div>disabled: {String(field.disabled)}</div>
+            <div>readonly: {String(field.readOnly)}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
