@@ -3,6 +3,9 @@
   "description": "Base Level Extension",
   "version": "1.0",
   "manifest_version": 3,
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "chrome-autofill-for-jobs/public/hello.html",
     "default_icon": "chrome-autofill-for-jobs/public/hello_extensions.png"
@@ -10,5 +13,12 @@
   "side_panel": {
     "default_path": "chrome-autofill-for-jobs/dist/index.html"
   },
-  "permissions": ["sidePanel"]
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["chrome-autofill-for-jobs/src/scripts/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["sidePanel","tabs", "scripting"]
 }
