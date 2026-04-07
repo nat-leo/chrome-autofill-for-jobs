@@ -4,7 +4,7 @@
   "version": "1.0",
   "manifest_version": 3,
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "chrome-autofill-for-jobs/src/scripts/background.js"
   },
   "action": {
     "default_popup": "chrome-autofill-for-jobs/public/hello.html",
@@ -20,5 +20,6 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["sidePanel","tabs", "scripting"]
+  "permissions": ["sidePanel", "tabs", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"]
 }
