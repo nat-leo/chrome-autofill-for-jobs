@@ -6,5 +6,9 @@
   "action": {
     "default_popup": "chrome-autofill-for-jobs/public/hello.html",
     "default_icon": "chrome-autofill-for-jobs/public/hello_extensions.png"
-  }
+  },
+  "side_panel": {
+    "default_path": "chrome-autofill-for-jobs/dist/index.html"
+  },
+  "permissions": ["sidePanel"]
 }
