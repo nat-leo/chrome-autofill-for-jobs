@@ -1,7 +1,21 @@
 // content.js
 
 function getEditableFieldElements() {
-  return [...document.querySelectorAll("input, textarea, select, [contenteditable='true']")];
+  return [...document.querySelectorAll(`
+    input,
+    textarea,
+    select,
+    [contenteditable="true"],
+    [role="textbox"],
+    [role="searchbox"],
+    [role="combobox"],
+    [role="listbox"],
+    [role="radio"],
+    [role="checkbox"],
+    [role="switch"],
+    [role="slider"],
+    [role="spinbutton"]
+  `)];
 }
 
 function getFieldInfo(el, domIndex) {
