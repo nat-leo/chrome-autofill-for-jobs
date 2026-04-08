@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
 type FieldInfo = {
+  domIndex: number;
   tag: string;
   type: string | null;
   name: string;
@@ -11,6 +13,23 @@ type FieldInfo = {
   visible: boolean;
   disabled: boolean;
   readOnly: boolean;
+};
+
+type ScanFieldsResponse = {
+  fields?: FieldInfo[];
+  title?: string;
+  url?: string;
+};
+
+type FillFieldPayload = {
+  domIndex: number;
+  value: string;
+};
+
+type FillFieldsResponse = {
+  updated: number;
+  total: number;
+  error?: string;
 };
 
 const CONTENT_SCRIPT_FILE = "chrome-autofill-for-jobs/src/scripts/content.js";
@@ -50,30 +69,32 @@ async function sendMessageWithRetry<T>(tabId: number, message: unknown): Promise
   }
 }
 
+async function getActiveTabId() {
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+
+  if (!tab?.id) {
+    throw new Error("No active tab found.");
+  }
+
+  return tab.id;
+}
+
 export default function App() {
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [pageTitle, setPageTitle] = useState("");
   const [pageUrl, setPageUrl] = useState("");
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
 
   async function scanActiveTab() {
     try {
       setError("");
 
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-
-      if (!tab?.id) {
-        throw new Error("No active tab found.");
-      }
-
-      const response = await sendMessageWithRetry<{
-        fields?: FieldInfo[];
-        title?: string;
-        url?: string;
-      }>(tab.id, {
+      const tabId = await getActiveTabId();
+      const response = await sendMessageWithRetry<ScanFieldsResponse>(tabId, {
         type: "SCAN_FIELDS",
       });
 
@@ -86,60 +107,106 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
+  function handleFieldValueChange(domIndex: number, value: string) {
+    setFields((prev) =>
+      prev.map((field) =>
+        field.domIndex === domIndex
+          ? {
+              ...field,
+              value,
+            }
+          : field,
+      ),
+    );
+  }
 
-        if (!tab?.id) return;
+  async function handleFillSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-        const res = await sendMessageWithRetry<{ fields?: FieldInfo[] }>(tab.id, {
-          type: "READ_FIELDS",
-        });
+    if (!fields.length) {
+      setError("No fields available to fill.");
+      return;
+    }
 
-        setFields(res?.fields || []);
-      } catch (err) {
-        console.error(err);
+    try {
+      setError("");
+      setStatus("");
+
+      const tabId = await getActiveTabId();
+      const payload: FillFieldPayload[] = fields.map((field) => ({
+        domIndex: field.domIndex,
+        value: field.value ?? "",
+      }));
+
+      const result = await sendMessageWithRetry<FillFieldsResponse>(tabId, {
+        type: "FILL_FIELDS",
+        fields: payload,
+      });
+
+      if (result?.error) {
+        throw new Error(result.error);
       }
-    })();
+
+      setStatus(`Filled ${result?.updated ?? 0} of ${result?.total ?? payload.length} fields on the webpage.`);
+      await scanActiveTab();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  useEffect(() => {
+    void scanActiveTab();
   }, []);
 
   return (
     <div style={{ padding: 12, fontFamily: "sans-serif" }}>
       <h2>Detected fields</h2>
-      <button onClick={scanActiveTab}>Refresh</button>
+      <button type="button" onClick={scanActiveTab}>Refresh</button>
 
       {pageTitle && <p><strong>Page:</strong> {pageTitle}</p>}
       {pageUrl && <p style={{ wordBreak: "break-all" }}>{pageUrl}</p>}
-      {error && <p>{error}</p>}
+      {error && <p style={{ color: "#b42318" }}>{error}</p>}
+      {status && <p style={{ color: "#027a48" }}>{status}</p>}
 
-      <ul style={{ padding: 0, listStyle: "none" }}>
-        {fields.map((field, i) => (
-          <li
-            key={`${field.id}-${field.name}-${i}`}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 10,
-              marginTop: 8,
-            }}
-          >
-            <div><strong>{field.label || field.placeholder || field.name || field.id || "(unlabeled field)"}</strong></div>
-            <div>tag: {field.tag}</div>
-            <div>type: {field.type ?? "-"}</div>
-            <div>name: {field.name || "-"}</div>
-            <div>id: {field.id || "-"}</div>
-            <div>placeholder: {field.placeholder || "-"}</div>
-            <div>value: {field.value || "-"}</div>
-            <div>visible: {String(field.visible)}</div>
-            <div>disabled: {String(field.disabled)}</div>
-            <div>readonly: {String(field.readOnly)}</div>
-          </li>
-        ))}
-      </ul>
+      <form onSubmit={handleFillSubmit}>
+        <ul style={{ padding: 0, listStyle: "none" }}>
+          {fields.map((field) => (
+            <li
+              key={`${field.domIndex}-${field.id}-${field.name}`}
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 8,
+                padding: 10,
+                marginTop: 8,
+              }}
+            >
+              <input
+                type="text"
+                value={field.value || ""}
+                onChange={(event) => handleFieldValueChange(field.domIndex, event.target.value)}
+                placeholder={field.placeholder || field.label || "Field value"}
+                disabled={field.disabled || field.readOnly}
+                style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }}
+              />
+
+              <div><strong>{field.label || field.placeholder || field.name || field.id || "(unlabeled field)"}</strong></div>
+              <div>tag: {field.tag}</div>
+              <div>type: {field.type ?? "-"}</div>
+              <div>name: {field.name || "-"}</div>
+              <div>id: {field.id || "-"}</div>
+              <div>placeholder: {field.placeholder || "-"}</div>
+              <div>value: {field.value || "-"}</div>
+              <div>visible: {String(field.visible)}</div>
+              <div>disabled: {String(field.disabled)}</div>
+              <div>readonly: {String(field.readOnly)}</div>
+            </li>
+          ))}
+        </ul>
+
+        <button type="submit" style={{ marginTop: 12 }} disabled={!fields.length}>
+          Fill Webpage Form
+        </button>
+      </form>
     </div>
   );
 }
