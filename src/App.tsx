@@ -1,41 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-
-type FieldInfo = {
-  domIndex: number;
-  tag: string;
-  type: string | null;
-  name: string;
-  id: string;
-  placeholder: string;
-  label: string;
-  value: string;
-  visible: boolean;
-  disabled: boolean;
-  readOnly: boolean;
-};
-
-type ScanFieldsResponse = {
-  fields?: FieldInfo[];
-  title?: string;
-  url?: string;
-};
-
-type FillFieldPayload = {
-  domIndex: number;
-  value: string;
-};
-
-type FillFieldsResponse = {
-  updated: number;
-  total: number;
-  error?: string;
-};
+import { FieldList } from "@/components/autofill/FieldList";
+import { FillActions } from "@/components/autofill/FillActions";
+import { PageSummary } from "@/components/autofill/PageSummary";
+import { PanelHeader } from "@/components/autofill/PanelHeader";
+import { StatusNotice } from "@/components/autofill/StatusNotice";
+import type {
+  FieldInfo,
+  FillFieldPayload,
+  FillFieldsResponse,
+  ScanFieldsResponse,
+} from "@/types/autofill";
 
 const CONTENT_SCRIPT_FILE = "chrome-autofill-for-jobs/src/scripts/content.js";
 
 function getErrorMessage(err: unknown) {
-  if (!(err instanceof Error)) return "Failed to scan fields.";
+  if (!(err instanceof Error)) return "Request failed.";
 
   if (
     err.message.includes("Missing host permission") ||
@@ -88,8 +68,11 @@ export default function App() {
   const [pageUrl, setPageUrl] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [isFilling, setIsFilling] = useState(false);
 
-  async function scanActiveTab() {
+  const scanActiveTab = useCallback(async () => {
+    setIsScanning(true);
     try {
       setError("");
 
@@ -104,10 +87,14 @@ export default function App() {
     } catch (err) {
       setError(getErrorMessage(err));
       setFields([]);
+      setPageTitle("");
+      setPageUrl("");
+    } finally {
+      setIsScanning(false);
     }
-  }
+  }, []);
 
-  function handleFieldValueChange(domIndex: number, value: string) {
+  const handleFieldValueChange = useCallback((domIndex: number, value: string) => {
     setFields((prev) =>
       prev.map((field) =>
         field.domIndex === domIndex
@@ -118,95 +105,80 @@ export default function App() {
           : field,
       ),
     );
-  }
+  }, []);
 
-  async function handleFillSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const handleFillSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
 
-    if (!fields.length) {
-      setError("No fields available to fill.");
-      return;
-    }
-
-    try {
-      setError("");
-      setStatus("");
-
-      const tabId = await getActiveTabId();
-      const payload: FillFieldPayload[] = fields.map((field) => ({
-        domIndex: field.domIndex,
-        value: field.value ?? "",
-      }));
-
-      const result = await sendMessageWithRetry<FillFieldsResponse>(tabId, {
-        type: "FILL_FIELDS",
-        fields: payload,
-      });
-
-      if (result?.error) {
-        throw new Error(result.error);
+      if (!fields.length) {
+        setError("No fields available to fill.");
+        return;
       }
 
-      setStatus(`Filled ${result?.updated ?? 0} of ${result?.total ?? payload.length} fields on the webpage.`);
-      await scanActiveTab();
-    } catch (err) {
-      setError(getErrorMessage(err));
-    }
-  }
+      setIsFilling(true);
+      try {
+        setError("");
+        setStatus("");
+
+        const tabId = await getActiveTabId();
+        const payload: FillFieldPayload[] = fields.map((field) => ({
+          domIndex: field.domIndex,
+          value: field.value ?? "",
+        }));
+
+        const result = await sendMessageWithRetry<FillFieldsResponse>(tabId, {
+          type: "FILL_FIELDS",
+          fields: payload,
+        });
+
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+
+        setStatus(
+          `Filled ${result?.updated ?? 0} of ${result?.total ?? payload.length} fields on the webpage.`,
+        );
+        await scanActiveTab();
+      } catch (err) {
+        setError(getErrorMessage(err));
+        setStatus("");
+      } finally {
+        setIsFilling(false);
+      }
+    },
+    [fields, scanActiveTab],
+  );
 
   useEffect(() => {
     void scanActiveTab();
-  }, []);
+  }, [scanActiveTab]);
 
   return (
-    <div style={{ padding: 12, fontFamily: "sans-serif" }}>
-      <h2>Detected fields</h2>
-      <button type="button" onClick={scanActiveTab}>Refresh</button>
+    <div className="min-h-screen bg-background text-foreground">
+      <main className="mx-auto flex w-full max-w-[430px] flex-col gap-3 p-3">
+        <PanelHeader
+          fieldCount={fields.length}
+          isScanning={isScanning}
+          onRefresh={scanActiveTab}
+        />
 
-      {pageTitle && <p><strong>Page:</strong> {pageTitle}</p>}
-      {pageUrl && <p style={{ wordBreak: "break-all" }}>{pageUrl}</p>}
-      {error && <p style={{ color: "#b42318" }}>{error}</p>}
-      {status && <p style={{ color: "#027a48" }}>{status}</p>}
+        <PageSummary pageTitle={pageTitle} pageUrl={pageUrl} />
+        <StatusNotice error={error} status={status} />
 
-      <form onSubmit={handleFillSubmit}>
-        <ul style={{ padding: 0, listStyle: "none" }}>
-          {fields.map((field) => (
-            <li
-              key={`${field.domIndex}-${field.id}-${field.name}`}
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 8,
-                padding: 10,
-                marginTop: 8,
-              }}
-            >
-              <input
-                type="text"
-                value={field.value || ""}
-                onChange={(event) => handleFieldValueChange(field.domIndex, event.target.value)}
-                placeholder={field.placeholder || field.label || "Field value"}
-                disabled={field.disabled || field.readOnly}
-                style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }}
-              />
+        <form className="space-y-3" onSubmit={handleFillSubmit}>
+          <FieldList
+            fields={fields}
+            isScanning={isScanning}
+            onFieldValueChange={handleFieldValueChange}
+          />
 
-              <div><strong>{field.label || field.placeholder || field.name || field.id || "(unlabeled field)"}</strong></div>
-              <div>tag: {field.tag}</div>
-              <div>type: {field.type ?? "-"}</div>
-              <div>name: {field.name || "-"}</div>
-              <div>id: {field.id || "-"}</div>
-              <div>placeholder: {field.placeholder || "-"}</div>
-              <div>value: {field.value || "-"}</div>
-              <div>visible: {String(field.visible)}</div>
-              <div>disabled: {String(field.disabled)}</div>
-              <div>readonly: {String(field.readOnly)}</div>
-            </li>
-          ))}
-        </ul>
-
-        <button type="submit" style={{ marginTop: 12 }} disabled={!fields.length}>
-          Fill Webpage Form
-        </button>
-      </form>
+          <FillActions
+            disabled={!fields.length || isScanning || isFilling}
+            isFilling={isFilling}
+          />
+        </form>
+      </main>
     </div>
   );
 }
