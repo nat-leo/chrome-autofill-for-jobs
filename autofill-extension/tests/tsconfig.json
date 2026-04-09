@@ -1,0 +1,10 @@
+/** tests/tsconfig.json 
+* 
+* This config exists to separate playwright testing config from the React project
+*/
+
+{
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": { "types": ["node", "playwright"] },
+  "include": ["./**/*.ts"]
+}
