@@ -13,8 +13,7 @@ let extensionId: string;
 test.beforeAll(async () => {
   // this looks for the manifest.json. If manifext.json is not in this extension path, 
   //the Browser will not be able to run the extension!
-  const extensionPath = fileURLToPath(new URL('../../', import.meta.url));
-  // 
+  const extensionPath = fileURLToPath(new URL('../', import.meta.url));
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pw-ext-'));
 
   context = await chromium.launchPersistentContext(userDataDir, {
