@@ -12,7 +12,7 @@ import type {
   ScanFieldsResponse,
 } from "@/types/autofill";
 
-const CONTENT_SCRIPT_FILE = "chrome-autofill-for-jobs/src/scripts/content.js";
+const CONTENT_SCRIPT_FILE = "src/scripts/content.js";
 
 function getErrorMessage(err: unknown) {
   if (!(err instanceof Error)) return "Request failed.";
