@@ -1,7 +1,7 @@
 // content.js
 
-function getEditableFieldElements() {
-  return [...document.querySelectorAll(`
+function getEditableFieldElementsFromRoot(root) {
+  return [...root.querySelectorAll(`
     input,
     textarea,
     select,
@@ -16,6 +16,44 @@ function getEditableFieldElements() {
     [role="slider"],
     [role="spinbutton"]
   `)];
+}
+
+function getAllRoots(root = document) {
+  const roots = [root];
+
+  for (const el of root.querySelectorAll("*")) {
+    if (el.shadowRoot) {
+      roots.push(...getAllRoots(el.shadowRoot));
+    }
+  }
+
+  for (const iframe of root.querySelectorAll("iframe")) {
+    try {
+      if (iframe.contentDocument) {
+        roots.push(...getAllRoots(iframe.contentDocument));
+      }
+    } catch {
+      // Cross-origin iframe; cannot inspect
+    }
+  }
+
+  return roots;
+}
+
+function getEditableFieldElements() {
+  const seen = new Set();
+  const results = [];
+
+  for (const root of getAllRoots()) {
+    for (const el of getEditableFieldElementsFromRoot(root)) {
+      if (!seen.has(el)) {
+        seen.add(el);
+        results.push(el);
+      }
+    }
+  }
+
+  return results;
 }
 
 function getFieldInfo(el, domIndex) {
