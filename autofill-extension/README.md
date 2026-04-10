@@ -17,3 +17,5 @@ Then, build the project.
 ```
 npm run build
 ```
+
+More documentation, architecture decisions, and roadmaps are available in `/docs`
