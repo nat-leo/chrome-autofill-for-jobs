@@ -1,6 +1,6 @@
 {
-  "name": "Hello Extensions of the World with React!",
-  "description": "Base Level Extension",
+  "name": "Job Application Autofill",
+  "description": "Cut time spent applying to jobs by autofilling your information from one place.",
   "version": "1.0",
   "manifest_version": 3,
   "background": {
