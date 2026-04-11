@@ -12,8 +12,6 @@ import type {
   ScanFieldsResponse,
 } from "@/types/autofill";
 
-const CONTENT_SCRIPT_FILE = "src/scripts/content.js";
-
 function getErrorMessage(err: unknown) {
   if (!(err instanceof Error)) return "Request failed.";
 
@@ -32,24 +30,26 @@ function getErrorMessage(err: unknown) {
   return err.message;
 }
 
-async function sendMessageWithRetry<T>(tabId: number, message: unknown): Promise<T> {
-  try {
-    return await chrome.tabs.sendMessage(tabId, message);
-  } catch (err) {
-    if (!(err instanceof Error) || !err.message.includes("Receiving end does not exist")) {
-      throw err;
-    }
+function sendMessageToBackground<T>(message: unknown): Promise<T> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response: T) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message || "Failed to reach extension service worker."));
+        return;
+      }
 
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [CONTENT_SCRIPT_FILE],
+      resolve(response);
     });
-
-    return await chrome.tabs.sendMessage(tabId, message);
-  }
+  });
 }
 
-async function getActiveTabId() {
+type ActiveTabContext = {
+  tabId: number;
+  title: string;
+  url: string;
+};
+
+async function getActiveTabContext(): Promise<ActiveTabContext> {
   const [tab] = await chrome.tabs.query({
     active: true,
     currentWindow: true,
@@ -59,7 +59,11 @@ async function getActiveTabId() {
     throw new Error("No active tab found.");
   }
 
-  return tab.id;
+  return {
+    tabId: tab.id,
+    title: tab.title ?? "",
+    url: tab.url ?? "",
+  };
 }
 
 export default function App() {
@@ -76,14 +80,25 @@ export default function App() {
     try {
       setError("");
 
-      const tabId = await getActiveTabId();
-      const response = await sendMessageWithRetry<ScanFieldsResponse>(tabId, {
+      const tab = await getActiveTabContext();
+      const response = await sendMessageToBackground<ScanFieldsResponse>({
         type: "SCAN_FIELDS",
+        tabId: tab.tabId,
       });
 
-      setFields(response?.fields ?? []);
-      setPageTitle(response?.title ?? "");
-      setPageUrl(response?.url ?? "");
+      if (!response.ok) {
+        throw new Error(response.error.message);
+      }
+
+      setFields((previousFields) => {
+        const previousValues = new Map(previousFields.map((field) => [field.id, field.value]));
+        return response.data.map((field) => ({
+          ...field,
+          value: previousValues.get(field.id) ?? "",
+        }));
+      });
+      setPageTitle(tab.title);
+      setPageUrl(tab.url);
     } catch (err) {
       setError(getErrorMessage(err));
       setFields([]);
@@ -94,10 +109,10 @@ export default function App() {
     }
   }, []);
 
-  const handleFieldValueChange = useCallback((domIndex: number, value: string) => {
+  const handleFieldValueChange = useCallback((fieldId: string, value: string) => {
     setFields((prev) =>
       prev.map((field) =>
-        field.domIndex === domIndex
+        field.id === fieldId
           ? {
               ...field,
               value,
@@ -121,23 +136,27 @@ export default function App() {
         setError("");
         setStatus("");
 
-        const tabId = await getActiveTabId();
+        const tab = await getActiveTabContext();
         const payload: FillFieldPayload[] = fields.map((field) => ({
-          domIndex: field.domIndex,
+          fieldId: field.id,
           value: field.value ?? "",
         }));
 
-        const result = await sendMessageWithRetry<FillFieldsResponse>(tabId, {
+        const result = await sendMessageToBackground<FillFieldsResponse>({
           type: "FILL_FIELDS",
-          fields: payload,
+          tabId: tab.tabId,
+          payload,
         });
 
-        if (result?.error) {
-          throw new Error(result.error);
+        if (!result.ok) {
+          throw new Error(result.error.message);
         }
 
+        const total = result.data.filled.length;
+        const updated = result.data.filled.filter((item) => item.success).length;
+
         setStatus(
-          `Filled ${result?.updated ?? 0} of ${result?.total ?? payload.length} fields on the webpage.`,
+          `Filled ${updated} of ${total || payload.length} fields on the webpage.`,
         );
         await scanActiveTab();
       } catch (err) {
