@@ -5,7 +5,7 @@ import { FieldCard } from "./FieldCard";
 type FieldListProps = {
   fields: FieldInfo[];
   isScanning: boolean;
-  onFieldValueChange: (domIndex: number, value: string) => void;
+  onFieldValueChange: (fieldId: string, value: string) => void;
 };
 
 export function FieldList({ fields, isScanning, onFieldValueChange }: FieldListProps) {
@@ -39,7 +39,7 @@ export function FieldList({ fields, isScanning, onFieldValueChange }: FieldListP
   return (
     <ul className="space-y-2">
       {fields.map((field) => (
-        <li key={`${field.domIndex}-${field.id}-${field.name}`}>
+        <li key={field.id}>
           <FieldCard field={field} onValueChange={onFieldValueChange} />
         </li>
       ))}
