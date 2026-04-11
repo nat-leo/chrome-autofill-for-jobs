@@ -5,6 +5,9 @@
 
 {
   "extends": "../tsconfig.node.json",
-  "compilerOptions": { "types": ["node", "playwright"] },
-  "include": ["./**/*.ts"]
+  "compilerOptions": {
+    "types": ["node", "playwright", "vitest/globals"],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["./**/*.ts", "./**/*.d.ts"]
 }
