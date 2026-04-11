@@ -11,9 +11,11 @@ const CONTENT_ERROR_TO_EXTENSION_ERROR = {
   TIMEOUT: "TIMEOUT",
   DOM_UNAVAILABLE: "CONTENT_SCRIPT_UNAVAILABLE",
   UNSUPPORTED_COMMAND: "INVALID_REQUEST",
+  CONTENT_SCRIPT_UNAVAILABLE: "CONTENT_SCRIPT_UNAVAILABLE",
 };
 
 const CONTENT_SCRIPT_TIMEOUT_MS = 5000;
+const CONTENT_SCRIPT_FILE = "src/scripts/content.js";
 
 function ok(data) {
   return { ok: true, data };
@@ -84,33 +86,66 @@ async function resolveTab(tabId) {
 }
 
 function sendToContentScript(tabId, internalRequest, timeoutMs = CONTENT_SCRIPT_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    let settled = false;
+  const sendOnce = () =>
+    new Promise((resolve) => {
+      let settled = false;
 
-    const timeoutHandle = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(error("TIMEOUT", `Content script request timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
+      const timeoutHandle = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(error("TIMEOUT", `Content script request timed out after ${timeoutMs}ms.`));
+      }, timeoutMs);
 
-    chrome.tabs.sendMessage(tabId, internalRequest, (response) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutHandle);
+      chrome.tabs.sendMessage(tabId, internalRequest, (response) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
 
-      if (chrome.runtime.lastError) {
-        resolve(
-          error(
-            "CONTENT_SCRIPT_UNAVAILABLE",
-            chrome.runtime.lastError.message || "Content script is not available in this tab.",
-          ),
-        );
-        return;
+        if (chrome.runtime.lastError) {
+          resolve(
+            error(
+              "CONTENT_SCRIPT_UNAVAILABLE",
+              chrome.runtime.lastError.message || "Content script is not available in this tab.",
+            ),
+          );
+          return;
+        }
+
+        resolve(response);
+      });
+    });
+
+  return Promise.resolve()
+    .then(() => sendOnce())
+    .then(async (response) => {
+      if (
+        response &&
+        response.ok === false &&
+        response.error &&
+        response.error.code === "CONTENT_SCRIPT_UNAVAILABLE" &&
+        typeof response.error.message === "string" &&
+        response.error.message.includes("Receiving end does not exist")
+      ) {
+        if (!chrome.scripting || typeof chrome.scripting.executeScript !== "function") {
+          return response;
+        }
+
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: [CONTENT_SCRIPT_FILE],
+          });
+        } catch (caught) {
+          const message =
+            caught instanceof Error ? caught.message : "Content script could not be injected.";
+          return error("CONTENT_SCRIPT_UNAVAILABLE", message);
+        }
+
+        return sendOnce();
       }
 
-      resolve(response);
+      return response;
     });
-  });
 }
 
 function normalizeReadPageContent(payload) {
