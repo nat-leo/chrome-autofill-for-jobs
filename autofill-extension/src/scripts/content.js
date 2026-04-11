@@ -32,7 +32,31 @@ function normalizeWhitespace(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
-function getAllRoots(root = document) {
+
+
+function getAllRootsV0(root = document) {
+  const roots = [root];
+
+  for (const el of root.querySelectorAll("*")) {
+    if (el.shadowRoot) {
+      roots.push(...getAllRootsV0(el.shadowRoot));
+    }
+  }
+
+  for (const iframe of root.querySelectorAll("iframe")) {
+    try {
+      if (iframe.contentDocument) {
+        roots.push(...getAllRootsV0(iframe.contentDocument));
+      }
+    } catch {
+      // Cross-origin iframe; cannot inspect
+    }
+  }
+
+  return roots;
+}
+
+function getAllRootsV1(root = document) {
   const roots = [root];
   const treeWalker = root.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
 
@@ -41,13 +65,13 @@ function getAllRoots(root = document) {
     if (!(node instanceof Element)) continue;
 
     if (node.shadowRoot) {
-      roots.push(...getAllRoots(node.shadowRoot));
+      roots.push(...getAllRootsV1(node.shadowRoot));
     }
 
     if (node instanceof HTMLIFrameElement) {
       try {
         if (node.contentDocument) {
-          roots.push(...getAllRoots(node.contentDocument));
+          roots.push(...getAllRootsV1(node.contentDocument));
         }
       } catch {
         // Cross-origin iframe is intentionally ignored.
@@ -77,7 +101,7 @@ function getEditableCandidateElements() {
   const found = [];
   const seen = new Set();
 
-  for (const root of getAllRoots()) {
+  for (const root of getAllRootsV1()) {
     if (!(root instanceof Document || root instanceof ShadowRoot)) continue;
 
     const nodes = root.querySelectorAll(selector);
