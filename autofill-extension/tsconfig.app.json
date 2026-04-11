@@ -24,5 +24,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "tests/background.spec.ts",
+    "tests/chrome-interface.spec.ts",
+    "tests/content.spec.ts",
+    "tests/**/*.d.ts"
+  ]
 }
